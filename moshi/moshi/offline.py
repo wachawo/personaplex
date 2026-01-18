@@ -181,6 +181,10 @@ def run_inference(
     if seed is not None and seed != -1:
         seed_all(seed)
 
+    # Download config.json to increment download counter
+    # No worries about double-counting since config.json will be cached the second time
+    hf_hub_download(hf_repo, "config.json")
+
     # 1) Load Mimi encoders/decoders (same as server.py)
     log("info", "loading mimi")
     if mimi_weight is None:

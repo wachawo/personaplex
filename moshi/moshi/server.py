@@ -421,6 +421,10 @@ def main():
         else:
             tunnel_token = args.gradio_tunnel_token
 
+    # Download config.json to increment download counter
+    # No worries about double-counting since config.json will be cached the second time
+    hf_hub_download(args.hf_repo, "config.json")
+
     logger.info("loading mimi")
     if args.mimi_weight is None:
         args.mimi_weight = hf_hub_download(args.hf_repo, loaders.MIMI_NAME)
