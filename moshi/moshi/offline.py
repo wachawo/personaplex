@@ -39,26 +39,12 @@ This script reuses helpers from lm.py (load_audio, _iterate_audio, encode_from_s
 keep parity with voice-prompt feeding logic in the server.
 """
 
-# Load .env.local to configure HuggingFace cache paths before imports
+# Load .env / .env.local before any imports that read env vars (e.g. huggingface_hub)
 import os
-import argparse
-import json
 import logging
-import tarfile
-from typing import Optional, List
-
-import numpy as np
-import torch
-import sentencepiece
-import sphn
-from huggingface_hub import hf_hub_download
 from pathlib import Path
 from dotenv import load_dotenv
-
-from .models import loaders, LMGen, MimiModel
-from .models.lm import load_audio as lm_load_audio
-from .models.lm import _iterate_audio as lm_iterate_audio
-from .models.lm import encode_from_sphn as lm_encode_from_sphn
+from .utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +61,26 @@ if ENV_LOCAL.exists():
     logger.info(f"[.env.local] Loaded local overrides from {ENV_LOCAL}")
 if not ENV_FILE.exists() and not ENV_LOCAL.exists():
     logger.info(f"[env] No .env or .env.local found in {PROJECT_ROOT}, using defaults")
+
+import argparse
+import json
+import logging
+import tarfile
+from typing import Optional, List
+
+import numpy as np
+import torch
+import sentencepiece
+import sphn
+from huggingface_hub import hf_hub_download
+
+from .models import loaders, LMGen, MimiModel
+from .models.lm import load_audio as lm_load_audio
+from .models.lm import _iterate_audio as lm_iterate_audio
+from .models.lm import encode_from_sphn as lm_encode_from_sphn
+
+logger = logging.getLogger(__name__)
+
 
 
 def seed_all(seed: int):

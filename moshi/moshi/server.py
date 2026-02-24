@@ -26,6 +26,27 @@
 
 # Load .env.local to configure HuggingFace cache paths before imports
 import os
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
+from .utils.logger import setup_logging
+
+logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+ENV_LOCAL = PROJECT_ROOT / ".env.local"
+# Load .env first (base values)
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE, override=False)
+    logger.info(f"[.env] Loaded base configuration from {ENV_FILE}")
+# Load .env.local second (overrides .env)
+if ENV_LOCAL.exists():
+    load_dotenv(ENV_LOCAL, override=True)
+    logger.info(f"[.env.local] Loaded local overrides from {ENV_LOCAL}")
+if not ENV_FILE.exists() and not ENV_LOCAL.exists():
+    logger.info(f"[env] No .env or .env.local found in {PROJECT_ROOT}, using defaults")
+
 import argparse
 import asyncio
 from dataclasses import dataclass
@@ -45,28 +66,9 @@ import sentencepiece
 import sphn
 import torch
 import random
-from pathlib import Path
-from dotenv import load_dotenv
-
 from .models import loaders, MimiModel, LMModel, LMGen
-from .utils.logger import setup_logging
+
 from .utils.connection import create_ssl_context, get_lan_ip
-
-logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-ENV_FILE = PROJECT_ROOT / ".env"
-ENV_LOCAL = PROJECT_ROOT / ".env.local"
-# Load .env first (base values)
-if ENV_FILE.exists():
-    load_dotenv(ENV_FILE, override=False)
-    logger.info(f"[.env] Loaded base configuration from {ENV_FILE}")
-# Load .env.local second (overrides .env)
-if ENV_LOCAL.exists():
-    load_dotenv(ENV_LOCAL, override=True)
-    logger.info(f"[.env.local] Loaded local overrides from {ENV_LOCAL}")
-if not ENV_FILE.exists() and not ENV_LOCAL.exists():
-    logger.info(f"[env] No .env or .env.local found in {PROJECT_ROOT}, using defaults")
 
 DeviceString = Literal["cuda"] | Literal["cpu"]  # | Literal["mps"]
 
