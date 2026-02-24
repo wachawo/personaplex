@@ -44,7 +44,6 @@ import os
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
-from .utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +78,6 @@ from .models.lm import load_audio as lm_load_audio
 from .models.lm import _iterate_audio as lm_iterate_audio
 from .models.lm import encode_from_sphn as lm_encode_from_sphn
 
-logger = logging.getLogger(__name__)
-
-
 
 def seed_all(seed: int):
     """Seed torch, CUDA, numpy, and Python RNG for reproducible runs.
@@ -94,6 +90,7 @@ def seed_all(seed: int):
         torch.cuda.manual_seed_all(seed)
     import random
     import numpy as _np
+
     random.seed(seed)
     _np.random.seed(seed)
     torch.backends.cudnn.deterministic = False
@@ -110,7 +107,9 @@ def wrap_with_system_tags(text: str) -> str:
     return f"<system> {cleaned} <system>"
 
 
-def warmup(mimi: MimiModel, other_mimi: MimiModel, lm_gen: LMGen, device: str, frame_size: int):
+def warmup(
+    mimi: MimiModel, other_mimi: MimiModel, lm_gen: LMGen, device: str, frame_size: int
+):
     """Run a short warmup loop to initialize CUDA graphs and streaming state.
 
     Replicates the same warmup behavior as server.py: zeros → encode → LMGen.step → decode.
@@ -130,7 +129,9 @@ def warmup(mimi: MimiModel, other_mimi: MimiModel, lm_gen: LMGen, device: str, f
         torch.cuda.synchronize()
 
 
-def decode_tokens_to_pcm(mimi: MimiModel, other_mimi: MimiModel, lm_gen: LMGen, tokens: torch.Tensor) -> np.ndarray:
+def decode_tokens_to_pcm(
+    mimi: MimiModel, other_mimi: MimiModel, lm_gen: LMGen, tokens: torch.Tensor
+) -> np.ndarray:
     """Decode a single step of model tokens to PCM using Mimi.
 
     tokens is shaped [B, dep_q+1, 1]; channels 1..dep_q are the agent audio codebooks.
@@ -142,7 +143,9 @@ def decode_tokens_to_pcm(mimi: MimiModel, other_mimi: MimiModel, lm_gen: LMGen, 
     return pcm
 
 
-def _get_voice_prompt_dir(voice_prompt_dir: Optional[str], hf_repo: str) -> Optional[str]:
+def _get_voice_prompt_dir(
+    voice_prompt_dir: Optional[str], hf_repo: str
+) -> Optional[str]:
     """
     If voice_prompt_dir is None:
       - download voices.tgz from HF
@@ -253,13 +256,15 @@ def run_inference(
 
     # 6) Prompt configuration (text + voice)
     # System text tokens (k=0) and agent voice-prompt audio (k=1..dep_q) are forced
-    if voice_prompt_path.endswith('.pt'):
+    if voice_prompt_path.endswith(".pt"):
         # Load pre-saved voice prompt embeddings
         lm_gen.load_voice_prompt_embeddings(voice_prompt_path)
     else:
         lm_gen.load_voice_prompt(voice_prompt_path)
     lm_gen.text_prompt_tokens = (
-        text_tokenizer.encode(wrap_with_system_tags(text_prompt)) if len(text_prompt) > 0 else None
+        text_tokenizer.encode(wrap_with_system_tags(text_prompt))
+        if len(text_prompt) > 0
+        else None
     )
 
     # 7) Reset streaming and run initial prompt phases
@@ -286,9 +291,7 @@ def run_inference(
 
     for user_encoded in lm_encode_from_sphn(
         mimi,
-        lm_iterate_audio(
-            user_audio, sample_interval_size=lm_gen._frame_size, pad=True
-        ),
+        lm_iterate_audio(user_audio, sample_interval_size=lm_gen._frame_size, pad=True),
         max_batch=1,
     ):
         # user_encoded: [1, K, T]. Feed one step at a time (usually T==1)
@@ -310,12 +313,14 @@ def run_inference(
                 logger.info("text token '%s'", _text)
                 generated_text_tokens.append(_text)
             else:
-                text_token_map = ['EPAD', 'BOS', 'EOS', 'PAD']
+                text_token_map = ["EPAD", "BOS", "EOS", "PAD"]
                 logger.info("text token '%s'", text_token_map[text_token])
                 generated_text_tokens.append(text_token_map[text_token])
 
     if len(generated_frames) == 0:
-        logger.error("No audio frames were generated. Check input file and configuration.")
+        logger.error(
+            "No audio frames were generated. Check input file and configuration."
+        )
         return
 
     # 10) Concatenate frames and trim/pad to match input duration
@@ -335,7 +340,7 @@ def run_inference(
     # 12) Write text tokens
     with open(output_text, "w") as file:
         json.dump(generated_text_tokens, file, ensure_ascii=False)
-    logger.info("Wrote output text to %s", output_text)    
+    logger.info("Wrote output text to %s", output_text)
 
 
 def main():
@@ -348,18 +353,35 @@ def main():
         description="Offline inference from WAV input using Moshi server components."
     )
     parser.add_argument(
-        "--input-wav", required=True, type=str, help="Path to input WAV file (user audio)"
+        "--input-wav",
+        required=True,
+        type=str,
+        help="Path to input WAV file (user audio)",
     )
     parser.add_argument(
-        "--output-wav", required=True, type=str, help="Path to output WAV file of agent audio to write"
+        "--output-wav",
+        required=True,
+        type=str,
+        help="Path to output WAV file of agent audio to write",
     )
     parser.add_argument(
-        "--output-text", required=True, type=str, help="Path to output JSON file of agent text to write"
+        "--output-text",
+        required=True,
+        type=str,
+        help="Path to output JSON file of agent text to write",
     )
-    parser.add_argument("--text-prompt", default="You are a wise and friendly teacher. Answer questions or provide advice in a clear and engaging way.", type=str, help="Text prompt")
+    parser.add_argument(
+        "--text-prompt",
+        default="You are a wise and friendly teacher. Answer questions or provide advice in a clear and engaging way.",
+        type=str,
+        help="Text prompt",
+    )
 
     parser.add_argument(
-        "--voice-prompt", required=True, type=str, help="Voice prompt filename (basename) inside --voice-prompt-dir (e.g. 'NATM1.pt')."
+        "--voice-prompt",
+        required=True,
+        type=str,
+        help="Voice prompt filename (basename) inside --voice-prompt-dir (e.g. 'NATM1.pt').",
     )
     parser.add_argument(
         "--voice-prompt-dir",
@@ -368,13 +390,17 @@ def main():
             "Directory containing voice prompt files. "
             "If omitted, voices.tgz is downloaded from HF and extracted."
             "Voice prompt filenames from -voice-prompt arg will be joined with this directory path."
-        )
+        ),
     )
 
     # Model assets
     parser.add_argument("--tokenizer", type=str, help="Path to a local tokenizer file.")
-    parser.add_argument("--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi.")
-    parser.add_argument("--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi.")
+    parser.add_argument(
+        "--moshi-weight", type=str, help="Path to a local checkpoint file for Moshi."
+    )
+    parser.add_argument(
+        "--mimi-weight", type=str, help="Path to a local checkpoint file for Mimi."
+    )
     parser.add_argument(
         "--hf-repo",
         type=str,
@@ -384,13 +410,22 @@ def main():
 
     # Runtime / sampling controls (mirror UI semantics)
     parser.add_argument(
-        "--temp-audio", type=float, default=0.8, help="Audio sampling temperature (default: 0.8)"
+        "--temp-audio",
+        type=float,
+        default=0.8,
+        help="Audio sampling temperature (default: 0.8)",
     )
     parser.add_argument(
-        "--temp-text", type=float, default=0.7, help="Text sampling temperature (default: 0.7)"
+        "--temp-text",
+        type=float,
+        default=0.7,
+        help="Text sampling temperature (default: 0.7)",
     )
     parser.add_argument(
-        "--topk-audio", type=int, default=250, help="Audio top-k sampling (default: 250)"
+        "--topk-audio",
+        type=int,
+        default=250,
+        help="Audio top-k sampling (default: 250)",
     )
     parser.add_argument(
         "--topk-text", type=int, default=25, help="Text top-k sampling (default: 25)"
@@ -399,12 +434,20 @@ def main():
         "--greedy", action="store_true", help="Disable sampling (greedy decoding)"
     )
     parser.add_argument(
-        "--device", type=str, default="cuda", help="Device on which to run, defaults to 'cuda'."
+        "--device",
+        type=str,
+        default="cuda",
+        help="Device on which to run, defaults to 'cuda'.",
     )
-    parser.add_argument("--cpu-offload", action="store_true",
-                        help="Offload LM model layers to CPU when GPU memory is insufficient. "
-                             "Requires 'accelerate' package.")
-    parser.add_argument("--seed", type=int, default=-1, help="Seed for reproducibility (-1 disables)")
+    parser.add_argument(
+        "--cpu-offload",
+        action="store_true",
+        help="Offload LM model layers to CPU when GPU memory is insufficient. "
+        "Requires 'accelerate' package.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=-1, help="Seed for reproducibility (-1 disables)"
+    )
 
     args = parser.parse_args()
 

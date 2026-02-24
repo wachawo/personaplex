@@ -674,7 +674,9 @@ def main():
     )
     logger.info(f"Access the Web UI directly at {protocol}://{host_ip}:{args.port}")
     if setup_tunnel is not None:
-        tunnel = cast(Callable, setup_tunnel)("localhost", args.port, tunnel_token, None)
+        tunnel = cast(Callable, setup_tunnel)(
+            "localhost", args.port, tunnel_token, None
+        )
         logger.info(
             f"Tunnel started, if executing on a remote GPU, you can use {tunnel}."
         )
