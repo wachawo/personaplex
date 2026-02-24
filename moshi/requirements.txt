@@ -7,3 +7,4 @@ sounddevice==0.5
 sphn>=0.1.4,<0.2
 torch==2.10.0
 aiohttp>=3.10.5,<3.11
+accelerate>=1.12,<1.13
