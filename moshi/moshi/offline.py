@@ -40,10 +40,11 @@ keep parity with voice-prompt feeding logic in the server.
 """
 
 import argparse
+import json
+import logging
 import os
 import tarfile
 from pathlib import Path
-import json
 from typing import Optional, List
 
 import numpy as np
@@ -52,15 +53,12 @@ import sentencepiece
 import sphn
 from huggingface_hub import hf_hub_download
 
-from .client_utils import make_log
 from .models import loaders, LMGen, MimiModel
 from .models.lm import load_audio as lm_load_audio
 from .models.lm import _iterate_audio as lm_iterate_audio
 from .models.lm import encode_from_sphn as lm_encode_from_sphn
 
-
-def log(level: str, msg: str):
-    print(make_log(level, msg))
+logger = logging.getLogger(__name__)
 
 
 def seed_all(seed: int):
@@ -134,13 +132,13 @@ def _get_voice_prompt_dir(voice_prompt_dir: Optional[str], hf_repo: str) -> Opti
     if voice_prompt_dir is not None:
         return voice_prompt_dir
 
-    log("info", "retrieving voice prompts")
+    logger.info("retrieving voice prompts")
     voices_tgz = hf_hub_download(hf_repo, "voices.tgz")
     voices_tgz = Path(voices_tgz)
     voices_dir = voices_tgz.parent / "voices"
 
     if not voices_dir.exists():
-        log("info", f"extracting {voices_tgz} to {voices_dir}")
+        logger.info("extracting %s to %s", voices_tgz, voices_dir)
         with tarfile.open(voices_tgz, "r:gz") as tar:
             tar.extractall(path=voices_tgz.parent)
 
@@ -187,12 +185,12 @@ def run_inference(
     hf_hub_download(hf_repo, "config.json")
 
     # 1) Load Mimi encoders/decoders (same as server.py)
-    log("info", "loading mimi")
+    logger.info("loading mimi")
     if mimi_weight is None:
         mimi_weight = hf_hub_download(hf_repo, loaders.MIMI_NAME)  # type: ignore
     mimi = loaders.get_mimi(mimi_weight, device)
     other_mimi = loaders.get_mimi(mimi_weight, device)
-    log("info", "mimi loaded")
+    logger.info("mimi loaded")
 
     # 2) Load tokenizer
     if tokenizer_path is None:
@@ -200,12 +198,12 @@ def run_inference(
     text_tokenizer = sentencepiece.SentencePieceProcessor(tokenizer_path)  # type: ignore
 
     # 3) Load Moshi LM and eval mode
-    log("info", "loading moshi")
+    logger.info("loading moshi")
     if moshi_weight is None:
         moshi_weight = hf_hub_download(hf_repo, loaders.MOSHI_NAME)  # type: ignore
     lm = loaders.get_moshi_lm(moshi_weight, device=device, cpu_offload=cpu_offload)
     lm.eval()
-    log("info", "moshi loaded")
+    logger.info("moshi loaded")
 
     # 4) Construct LMGen like server.py's ServerState does
     frame_size = int(mimi.sample_rate / mimi.frame_rate)
@@ -228,7 +226,7 @@ def run_inference(
     lm_gen.streaming_forever(1)
 
     # 5) Warmup
-    log("info", "warming up the model")
+    logger.info("warming up the model")
     warmup(mimi, other_mimi, lm_gen, device, frame_size)
 
     # 6) Prompt configuration (text + voice)
@@ -287,15 +285,15 @@ def run_inference(
             if text_token not in (0, 3):
                 _text = text_tokenizer.id_to_piece(text_token)  # type: ignore
                 _text = _text.replace("▁", " ")
-                log("info", f"text token '{_text}'")
+                logger.info("text token '%s'", _text)
                 generated_text_tokens.append(_text)
             else:
                 text_token_map = ['EPAD', 'BOS', 'EOS', 'PAD']
-                log("info", f"text token '{text_token_map[text_token]}'")
+                logger.info("text token '%s'", text_token_map[text_token])
                 generated_text_tokens.append(text_token_map[text_token])
 
     if len(generated_frames) == 0:
-        log("error", "No audio frames were generated. Check input file and configuration.")
+        logger.error("No audio frames were generated. Check input file and configuration.")
         return
 
     # 10) Concatenate frames and trim/pad to match input duration
@@ -310,16 +308,20 @@ def run_inference(
 
     # 11) Write mono WAV at model sample rate
     sphn.write_wav(output_wav, output_pcm, sample_rate)
-    log("info", f"Wrote output audio to {output_wav}")
+    logger.info("Wrote output audio to %s", output_wav)
 
     # 12) Write text tokens
     with open(output_text, "w") as file:
         json.dump(generated_text_tokens, file, ensure_ascii=False)
-    log("info", f"Wrote output text to {output_text}")    
+    logger.info("Wrote output text to %s", output_text)    
 
 
 def main():
     """Parse CLI args and run offline inference."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
     parser = argparse.ArgumentParser(
         description="Offline inference from WAV input using Moshi server components."
     )
@@ -391,7 +393,7 @@ def main():
     )
     if not os.path.exists(voice_prompt_dir):
         raise FileNotFoundError(f"voice_prompt_dir does not exist: {voice_prompt_dir}")
-    log("info", f"voice_prompt_dir = {voice_prompt_dir}")
+    logger.info("voice_prompt_dir = %s", voice_prompt_dir)
 
     # Join basename with directory (DO NOT mutate args.voice_prompt)
     voice_prompt_path = os.path.join(voice_prompt_dir, args.voice_prompt)

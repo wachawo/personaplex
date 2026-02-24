@@ -25,9 +25,9 @@ import platform
 from shutil import which
 import urllib.request
 from pathlib import Path
-from .logging import setup_logger
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 def get_lan_ip():
     """

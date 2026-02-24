@@ -22,7 +22,14 @@ import torch.nn.functional as F
 import logging
 import types
 
+from einops import rearrange
+
 logger = logging.getLogger(__name__)
+
+# FP8 E4M3 scale: max representable value; scale = amax / FP8_E4M3_MAX
+FP8_E4M3_MAX = 448.0
+SCALE_EPS = 1e-12
+DEFAULT_MIN_FEATURES = 512
 
 
 def fp8_linear(x, weight_fp8, weight_scale, bias=None):
@@ -33,7 +40,7 @@ def fp8_linear(x, weight_fp8, weight_scale, bias=None):
     x_2d = x.reshape(-1, in_features)
 
     x_amax = x_2d.abs().amax()
-    x_scale = (x_amax / 448.0).clamp(min=1e-12)
+    x_scale = (x_amax / FP8_E4M3_MAX).clamp(min=SCALE_EPS)
     x_fp8 = (x_2d / x_scale).to(torch.float8_e4m3fn)
 
     out = torch._scaled_mm(
@@ -83,12 +90,10 @@ def _make_gating_forward():
 # Attention forward patch (in_proj_weight is bare nn.Parameter, not nn.Linear)
 
 
-def _make_attn_forward():
-    from einops import rearrange as _rearrange
+def _make_attn_forward(tf_mod):
+    """Build attention forward that uses tf_mod (captured once, no import in hot path)."""
 
     def attn_forward_fp8(self, query, key, value):
-        import moshi.modules.transformer as tf_mod
-
         state = self._streaming_state
         T = query.shape[1]
 
@@ -111,7 +116,7 @@ def _make_attn_forward():
             else:
                 projected = F.linear(query, self.in_proj_weight)
 
-        q, k, v = _rearrange(
+        q, k, v = rearrange(
             projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
         )
 
@@ -132,7 +137,7 @@ def _make_attn_forward():
             attn_bias = None
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
 
-        x = _rearrange(x, "b h t d -> b t (h d)")
+        x = rearrange(x, "b h t d -> b t (h d)")
         if self.weights_per_step:
             x = tf_mod.multi_linear(
                 self.weights_per_step, self.out_proj.weight, x, offset_cpu
@@ -158,7 +163,7 @@ def quantize_linear_fp8(module):
     """Quantize a single nn.Linear to FP8 in-place."""
     w = module.weight.data
     amax = w.abs().amax()
-    scale = (amax / 448.0).clamp(min=1e-12)
+    scale = (amax / FP8_E4M3_MAX).clamp(min=SCALE_EPS)
     module.weight = nn.Parameter(
         (w / scale).to(torch.float8_e4m3fn), requires_grad=False
     )
@@ -167,7 +172,7 @@ def quantize_linear_fp8(module):
     module.forward = types.MethodType(_fp8_forward, module)
 
 
-def quantize_model(model, min_features=512):
+def quantize_model(model, min_features=None):
     """Quantize all large Linear layers in the model to FP8.
 
     Patches ActivationGating and StreamingMultiheadAttention forward methods
@@ -178,8 +183,11 @@ def quantize_model(model, min_features=512):
     import moshi.modules.gating as gating_mod
     import moshi.modules.transformer as tf_mod
 
+    if min_features is None:
+        min_features = DEFAULT_MIN_FEATURES
+
     gating_mod.ActivationGating.forward = _make_gating_forward()
-    tf_mod.StreamingMultiheadAttention.forward = _make_attn_forward()
+    tf_mod.StreamingMultiheadAttention.forward = _make_attn_forward(tf_mod)
 
     linear_count = 0
     for name, module in list(model.named_modules()):
@@ -206,7 +214,7 @@ def quantize_model(model, min_features=512):
             if w.ndim != 2:
                 continue
             amax = w.abs().amax()
-            scale = (amax / 448.0).clamp(min=1e-12)
+            scale = (amax / FP8_E4M3_MAX).clamp(min=SCALE_EPS)
             module.register_buffer(
                 "_in_proj_fp8_weight", (w / scale).to(torch.float8_e4m3fn)
             )

@@ -27,8 +27,9 @@
 import argparse
 import asyncio
 from dataclasses import dataclass
-import random
+import logging
 import os
+import random
 from pathlib import Path
 import tarfile
 import time
@@ -45,13 +46,11 @@ import sphn
 import torch
 import random
 
-from .client_utils import make_log, colorize
 from .models import loaders, MimiModel, LMModel, LMGen
+from .utils.logger import setup_logging
 from .utils.connection import create_ssl_context, get_lan_ip
-from .utils.logging import setup_logger, ColorizedLog
 
-
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 DeviceString = Literal["cuda"] | Literal["cpu"]  # | Literal["mps"]
 
 
@@ -154,10 +153,9 @@ class ServerState:
     async def handle_chat(self, request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        clog = ColorizedLog.randomize()
         peer = request.remote  # IP
         peer_port = request.transport.get_extra_info("peername")[1]  # Port
-        clog.log("info", f"Incoming connection from {peer}:{peer_port}")
+        logger.info("Incoming connection from %s:%s", peer, peer_port)
 
         # self.lm_gen.temp = float(request.query["audio_temperature"])
         # self.lm_gen.temp_text = float(request.query["text_temperature"])
@@ -204,31 +202,31 @@ class ServerState:
             try:
                 async for message in ws:
                     if message.type == aiohttp.WSMsgType.ERROR:
-                        clog.log("error", f"{ws.exception()}")
+                        logger.error("%s", ws.exception())
                         break
                     elif message.type == aiohttp.WSMsgType.CLOSED:
                         break
                     elif message.type == aiohttp.WSMsgType.CLOSE:
                         break
                     elif message.type != aiohttp.WSMsgType.BINARY:
-                        clog.log("error", f"unexpected message type {message.type}")
+                        logger.error("unexpected message type %s", message.type)
                         continue
                     message = message.data
                     if not isinstance(message, bytes):
-                        clog.log("error", f"unsupported message type {type(message)}")
+                        logger.error("unsupported message type %s", type(message))
                         continue
                     if len(message) == 0:
-                        clog.log("warning", "empty message")
+                        logger.warning("empty message")
                         continue
                     kind = message[0]
                     if kind == 1:  # audio
                         payload = message[1:]
                         opus_reader.append_bytes(payload)
                     else:
-                        clog.log("warning", f"unknown message kind {kind}")
+                        logger.warning("unknown message kind %s", kind)
             finally:
                 close = True
-                clog.log("info", "connection closed")
+                logger.info("connection closed")
 
         async def opus_loop():
             all_pcm_data = None
@@ -360,13 +358,14 @@ class ServerState:
                 if len(msg) > 0:
                     await ws.send_bytes(b"\x01" + msg)
 
-        clog.log("info", "accepted connection")
+        logger.info("accepted connection")
         if len(request.query["text_prompt"]) > 0:
-            clog.log("info", f"text prompt: {request.query['text_prompt']}")
+            logger.info("text prompt: %s", request.query["text_prompt"])
         if len(request.query["voice_prompt"]) > 0:
-            clog.log(
-                "info",
-                f"voice prompt: {voice_prompt_path} (requested: {requested_voice_prompt_path})",
+            logger.info(
+                "voice prompt: %s (requested: %s)",
+                voice_prompt_path,
+                requested_voice_prompt_path,
             )
         close = False
         async with self.lock:
@@ -401,11 +400,11 @@ class ServerState:
             # Reuse mimi for encoding voice prompt and then reset it before conversation starts
             await self.lm_gen.step_system_prompts_async(self.mimi, is_alive=is_alive)
             self.mimi.reset_streaming()
-            clog.log("info", "done with system prompts")
+            logger.info("done with system prompts")
             # Send the handshake.
             if await is_alive():
                 await ws.send_bytes(b"\x00")
-                clog.log("info", "sent handshake bytes")
+                logger.info("sent handshake bytes")
                 # Clean cancellation manager
                 tasks = [
                     asyncio.create_task(recv_loop()),
@@ -423,9 +422,9 @@ class ServerState:
                     except asyncio.CancelledError:
                         pass
                 await ws.close()
-                clog.log("info", "session closed")
+                logger.info("session closed")
                 # await asyncio.gather(opus_loop(), recv_loop(), send_loop())
-        clog.log("info", "done with connection")
+        logger.info("done with connection")
         return ws
 
 
@@ -478,6 +477,12 @@ def _get_static_path(static: Optional[str]) -> Optional[str]:
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        help="Logging level (default: INFO)",
+    )
     parser.add_argument("--host", default="localhost", type=str)
     parser.add_argument("--port", default=8998, type=int)
     parser.add_argument("--static", type=str)
@@ -539,6 +544,7 @@ def main():
     )
 
     args = parser.parse_args()
+    setup_logging(level=getattr(logging, args.log_level))
     args.voice_prompt_dir = _get_voice_prompt_dir(
         args.voice_prompt_dir,
         args.hf_repo,
